@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>班ごとの発表マップ（画像アップロード対応）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: sans-serif; }
+    #map-container {
+      position: relative;
+      width: 800px;
+      height: 500px;
+      margin-bottom: 24px;
+      border: 1px solid #ccc;
+      background: #eee;
+    }
+    #campus-map {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .pin {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      background: url('https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png') no-repeat center center;
+      background-size: contain;
+      cursor: pointer;
+      transform: translate(-50%, -100%);
+    }
+    .popup {
+      position: absolute;
+      min-width: 220px;
+      background: #fff;
+      border: 1px solid #888;
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 10;
+      display: none;
+    }
+    .popup img {
+      max-width: 200px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .close-btn {
+      float: right;
+      cursor: pointer;
+      color: #888;
+      font-weight: bold;
+    }
+    #add-form {
+      margin-bottom: 24px;
+      background: #f8f8f8;
+      padding: 12px;
+      border-radius: 8px;
+      width: 800px;
+    }
+    #add-form label { display: block; margin-top: 8px; }
+    #add-form input, #add-form textarea { width: 100%; }
+    #img-preview { max-width: 120px; margin-top: 8px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h2>班ごとの発表マップ（画像アップロード対応）</h2>
+  <form id="add-form">
+    <b>新しいピンを追加</b>
+    <label>班名：<input type="text" id="group-name" required></label>
+    <label>説明：<textarea id="group-desc" rows="2" required></textarea></label>
+    <label>画像アップロード：<input type="file" id="group-img" accept="image/*" required></label>
+    <img id="img-preview" style="display:none;" />
+    <p>※地図上でピンを立てたい場所をクリックしてください</p>
+    <input type="hidden" id="pin-x">
+    <input type="hidden" id="pin-y">
+    <button type="submit" disabled id="submit-btn">ピンを追加</button>
+  </form>
+  <div id="map-container">
+    <img id="campus-map" src="campus-map.jpg" alt="キャンパスマップ" />
+    <!-- ピンとポップアップはここに追加されます -->
+  </div>
+
+  <script>
+    const mapContainer = document.getElementById('map-container');
+    const addForm = document.getElementById('add-form');
+    const pinXInput = document.getElementById('pin-x');
+    const pinYInput = document.getElementById('pin-y');
+    const submitBtn = document.getElementById('submit-btn');
+    const imgInput = document.getElementById('group-img');
+    const imgPreview = document.getElementById('img-preview');
+
+    let currentImgData = "";
+
+    // 画像プレビュー
+    imgInput.addEventListener('change', function(e){
+      const file = e.target.files[0];
+      if(file){
+        const reader = new FileReader();
+        reader.onload = function(ev){
+          imgPreview.src = ev.target.result;
+          imgPreview.style.display = "block";
+          currentImgData = ev.target.result;
+        }
+        reader.readAsDataURL(file);
+      } else {
+        imgPreview.style.display = "none";
+        currentImgData = "";
+      }
+    });
+
+    // 地図をクリックしてピン位置を決定
+    mapContainer.addEventListener('click', function(e){
+      // 画像の位置基準で座標取得
+      const rect = mapContainer.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      pinXInput.value = x;
+      pinYInput.value = y;
+      submitBtn.disabled = false;
+      // ピン設置位置を一時的に表示（既存ピンは消さない）
+      let tempPin = document.getElementById('temp-pin');
+      if(!tempPin){
+        tempPin = document.createElement('div');
+        tempPin.id = 'temp-pin';
+        tempPin.className = 'pin';
+        mapContainer.appendChild(tempPin);
+      }
+      tempPin.style.left = x + 'px';
+      tempPin.style.top = y + 'px';
+    });
+
+    // ピンの追加
+    addForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const name = document.getElementById('group-name').value;
+      const desc = document.getElementById('group-desc').value;
+      const x = parseInt(pinXInput.value, 10);
+      const y = parseInt(pinYInput.value, 10);
+      const imgData = currentImgData || "";
+      if(!name || !desc || isNaN(x) || isNaN(y) || !imgData){
+        alert("すべての項目を入力してください");
+        return;
+      }
+      addPin(x, y, name, desc, imgData);
+      // フォームリセット
+      addForm.reset();
+      imgPreview.style.display = "none";
+      currentImgData = "";
+      submitBtn.disabled = true;
+      // 仮ピン消す
+      const tempPin = document.getElementById('temp-pin');
+      if(tempPin) tempPin.remove();
+    });
+
+    // ピンとポップアップを追加
+    function addPin(x, y, name, desc, imgData){
+      // ピン
+      const pin = document.createElement('div');
+      pin.className = 'pin';
+      pin.style.left = x + 'px';
+      pin.style.top = y + 'px';
+      mapContainer.appendChild(pin);
+
+      // ポップアップ
+      const popup = document.createElement('div');
+      popup.className = 'popup';
+      popup.style.left = (x+36) + 'px';
+      popup.style.top = (y-60) + 'px';
+      popup.innerHTML = `
+        <span class="close-btn" onclick="this.parentNode.style.display='none'">×</span>
+        <b>${name}</b><br>
+        <img src="${imgData}" alt="班画像"><br>
+        <div>${desc}</div>
+      `;
+      mapContainer.appendChild(popup);
+
+      // ピンをクリックでポップアップ表示
+      pin.addEventListener('click', function(){
+        // すべてのポップアップを非表示
+        document.querySelectorAll('.popup').forEach(p=>p.style.display='none');
+        popup.style.display = 'block';
+      });
+    }
+
+    // 地図外クリックでポップアップを閉じる
+    document.addEventListener('click', function(e){
+      if(!mapContainer.contains(e.target)){
+        document.querySelectorAll('.popup').forEach(p=>p.style.display='none');
+      }
+    });
+  </script>
+</body>
+</html>
