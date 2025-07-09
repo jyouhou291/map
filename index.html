@@ -2,85 +2,174 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>班ごとの発表マップ（画像アップロード対応）</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>班ごとの発表マップ（リアルタイム共有）</title>
+  <meta name="viewport" content="width=900, initial-scale=1.0" />
+  <!-- Firebase CDN -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
   <style>
-    body { font-family: sans-serif; }
+    body { 
+      font-family: 'Segoe UI', 'ヒラギノ角ゴ ProN', 'メイリオ', sans-serif;
+      background: #f0f6ff;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 32px auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,80,200,0.05);
+      padding: 24px;
+    }
+    h2 {
+      text-align: center;
+      color: #2b4fa0;
+      margin-bottom: 16px;
+    }
+    #add-form {
+      background: #e3ecfa;
+      border-radius: 10px;
+      padding: 16px 24px;
+      margin-bottom: 28px;
+      border: 1px solid #b8d2f1;
+    }
+    #add-form label { display: block; margin-top: 10px; font-weight: bold;}
+    #add-form input, #add-form textarea {
+      width: 100%; 
+      padding: 6px;
+      margin-top: 3px;
+      border-radius: 4px;
+      border: 1px solid #b8d2f1;
+      font-size: 16px;
+      background: #f8fbff;
+    }
+    #add-form button {
+      margin-top: 12px;
+      background: #2b4fa0;
+      color: #fff;
+      font-weight: bold;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #add-form button:disabled { background: #cccccc; }
+    #img-preview { max-width: 120px; margin-top: 8px; border-radius: 6px; border: 1px solid #b8d2f1;}
     #map-container {
       position: relative;
       width: 800px;
       height: 500px;
-      margin-bottom: 24px;
-      border: 1px solid #ccc;
-      background: #eee;
+      margin: 0 auto 24px auto;
+      border: 2px solid #b8d2f1;
+      background: #eaf3ff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(80,160,255,0.10);
     }
     #campus-map {
       width: 100%;
       height: 100%;
       display: block;
+      pointer-events: none;
+      user-select: none;
+      border-radius: 12px;
     }
     .pin {
       position: absolute;
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 36px;
       background: url('https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png') no-repeat center center;
       background-size: contain;
       cursor: pointer;
       transform: translate(-50%, -100%);
+      z-index: 3;
+      transition: filter 0.2s;
     }
+    .pin:hover { filter: brightness(1.2); }
     .popup {
       position: absolute;
-      min-width: 220px;
+      min-width: 240px;
+      max-width: 320px;
       background: #fff;
-      border: 1px solid #888;
-      border-radius: 8px;
-      padding: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      border: 1.5px solid #2b4fa0;
+      border-radius: 10px;
+      padding: 14px;
+      box-shadow: 0 4px 16px rgba(0,80,200,0.12);
       z-index: 10;
       display: none;
     }
     .popup img {
-      max-width: 200px;
+      max-width: 180px;
       border-radius: 6px;
       margin-bottom: 8px;
+      border: 1px solid #b8d2f1;
     }
     .close-btn {
       float: right;
       cursor: pointer;
-      color: #888;
+      color: #2b4fa0;
       font-weight: bold;
+      font-size: 20px;
+      margin-top: -8px;
     }
-    #add-form {
-      margin-bottom: 24px;
-      background: #f8f8f8;
-      padding: 12px;
+    .legend {
+      margin: 0 auto 10px auto;
+      background: #e3ecfa;
       border-radius: 8px;
-      width: 800px;
+      padding: 7px 14px;
+      width: 600px;
+      font-size: 15px;
+      color: #333;
+      border: 1px solid #b8d2f1;
+      text-align: center;
     }
-    #add-form label { display: block; margin-top: 8px; }
-    #add-form input, #add-form textarea { width: 100%; }
-    #img-preview { max-width: 120px; margin-top: 8px; border-radius: 4px; }
+    @media (max-width: 900px) {
+      #map-container, #add-form { width: 100% !important; }
+      .legend { width: 98%;}
+    }
   </style>
 </head>
 <body>
-  <h2>班ごとの発表マップ（画像アップロード対応）</h2>
-  <form id="add-form">
-    <b>新しいピンを追加</b>
-    <label>班名：<input type="text" id="group-name" required></label>
-    <label>説明：<textarea id="group-desc" rows="2" required></textarea></label>
-    <label>画像アップロード：<input type="file" id="group-img" accept="image/*" required></label>
-    <img id="img-preview" style="display:none;" />
-    <p>※地図上でピンを立てたい場所をクリックしてください</p>
-    <input type="hidden" id="pin-x">
-    <input type="hidden" id="pin-y">
-    <button type="submit" disabled id="submit-btn">ピンを追加</button>
-  </form>
-  <div id="map-container">
-    <img id="campus-map" src="campus-map.jpg" alt="キャンパスマップ" />
-    <!-- ピンとポップアップはここに追加されます -->
+  <div class="container">
+    <h2>班ごとの発表マップ <span style="font-size:70%;color:#4e7fdc;">（リアルタイム共有）</span></h2>
+    <div class="legend">
+      地図上の好きな場所をクリックして、班のピンと説明・写真を追加しましょう。<br>
+      追加したピンは<strong>全員にリアルタイムで表示</strong>されます。
+    </div>
+    <form id="add-form">
+      <b>新しいピンを追加</b>
+      <label>班名 <input type="text" id="group-name" required placeholder="例：1班"></label>
+      <label>説明 <textarea id="group-desc" rows="2" required placeholder="発表内容など"></textarea></label>
+      <label>画像アップロード <input type="file" id="group-img" accept="image/*" required></label>
+      <img id="img-preview" style="display:none;" />
+      <p style="margin-top:10px;">※地図上でピンを立てたい場所をクリックしてください</p>
+      <input type="hidden" id="pin-x">
+      <input type="hidden" id="pin-y">
+      <button type="submit" disabled id="submit-btn">ピンを追加</button>
+    </form>
+    <div id="map-container">
+      <img id="campus-map" src="campus-map.jpg" alt="キャンパスマップ" />
+      <!-- ピンとポップアップはここに追加 -->
+    </div>
   </div>
-
   <script>
+    // ==== あなたのFirebase設定 ====
+    const firebaseConfig = {
+      apiKey: "AIzaSyBa3RZASjOQhIq1IEjwzjbWymbWEIW8XCk",
+      authDomain: "schoolmap-be991.firebaseapp.com",
+      projectId: "schoolmap-be991",
+      storageBucket: "schoolmap-be991.appspot.com", // 修正済み
+      messagingSenderId: "895521969140",
+      appId: "1:895521969140:web:914b953594f23880d9dfa1",
+      measurementId: "G-NCSXST508V"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    // ============================
+
     const mapContainer = document.getElementById('map-container');
     const addForm = document.getElementById('add-form');
     const pinXInput = document.getElementById('pin-x');
@@ -90,6 +179,8 @@
     const imgPreview = document.getElementById('img-preview');
 
     let currentImgData = "";
+    let tempPin = null;
+    let popups = [];
 
     // 画像プレビュー
     imgInput.addEventListener('change', function(e){
@@ -108,7 +199,7 @@
       }
     });
 
-    // 地図をクリックしてピン位置を決定
+    // 地図クリックでピン位置決定
     mapContainer.addEventListener('click', function(e){
       // 画像の位置基準で座標取得
       const rect = mapContainer.getBoundingClientRect();
@@ -117,23 +208,23 @@
       pinXInput.value = x;
       pinYInput.value = y;
       submitBtn.disabled = false;
-      // ピン設置位置を一時的に表示（既存ピンは消さない）
-      let tempPin = document.getElementById('temp-pin');
+      // 仮ピン表示
       if(!tempPin){
         tempPin = document.createElement('div');
         tempPin.id = 'temp-pin';
         tempPin.className = 'pin';
+        tempPin.style.opacity = 0.5;
         mapContainer.appendChild(tempPin);
       }
       tempPin.style.left = x + 'px';
       tempPin.style.top = y + 'px';
     });
 
-    // ピンの追加
-    addForm.addEventListener('submit', function(e){
+    // ピン追加
+    addForm.addEventListener('submit', async function(e){
       e.preventDefault();
-      const name = document.getElementById('group-name').value;
-      const desc = document.getElementById('group-desc').value;
+      const name = document.getElementById('group-name').value.trim();
+      const desc = document.getElementById('group-desc').value.trim();
       const x = parseInt(pinXInput.value, 10);
       const y = parseInt(pinYInput.value, 10);
       const imgData = currentImgData || "";
@@ -141,53 +232,74 @@
         alert("すべての項目を入力してください");
         return;
       }
-      addPin(x, y, name, desc, imgData);
+      // Firestoreに追加
+      await db.collection('pins').add({
+        name, desc, x, y, imgData, timestamp: new Date()
+      });
       // フォームリセット
       addForm.reset();
       imgPreview.style.display = "none";
       currentImgData = "";
       submitBtn.disabled = true;
-      // 仮ピン消す
-      const tempPin = document.getElementById('temp-pin');
       if(tempPin) tempPin.remove();
+      tempPin = null;
     });
 
+    // 既存ピンとポップアップを全削除
+    function clearPins(){
+      document.querySelectorAll('.pin:not(#temp-pin)').forEach(el=>el.remove());
+      document.querySelectorAll('.popup').forEach(el=>el.remove());
+      popups = [];
+    }
+
     // ピンとポップアップを追加
-    function addPin(x, y, name, desc, imgData){
+    function addPinRealtime(id, data){
       // ピン
       const pin = document.createElement('div');
       pin.className = 'pin';
-      pin.style.left = x + 'px';
-      pin.style.top = y + 'px';
+      pin.style.left = data.x + 'px';
+      pin.style.top = data.y + 'px';
+      pin.title = data.name;
       mapContainer.appendChild(pin);
 
       // ポップアップ
       const popup = document.createElement('div');
       popup.className = 'popup';
-      popup.style.left = (x+36) + 'px';
-      popup.style.top = (y-60) + 'px';
+      popup.style.left = (data.x+36) + 'px';
+      popup.style.top = (data.y-60) + 'px';
       popup.innerHTML = `
         <span class="close-btn" onclick="this.parentNode.style.display='none'">×</span>
-        <b>${name}</b><br>
-        <img src="${imgData}" alt="班画像"><br>
-        <div>${desc}</div>
+        <b style="color:#2b4fa0;">${data.name}</b><br>
+        <img src="${data.imgData}" alt="班画像"><br>
+        <div>${data.desc}</div>
       `;
       mapContainer.appendChild(popup);
+      popups.push(popup);
 
       // ピンをクリックでポップアップ表示
-      pin.addEventListener('click', function(){
+      pin.addEventListener('click', function(ev){
         // すべてのポップアップを非表示
-        document.querySelectorAll('.popup').forEach(p=>p.style.display='none');
+        popups.forEach(p=>p.style.display='none');
         popup.style.display = 'block';
+        ev.stopPropagation();
       });
     }
 
-    // 地図外クリックでポップアップを閉じる
+    // 他の場所クリックでポップアップ閉じる
     document.addEventListener('click', function(e){
       if(!mapContainer.contains(e.target)){
-        document.querySelectorAll('.popup').forEach(p=>p.style.display='none');
+        popups.forEach(p=>p.style.display='none');
       }
     });
+
+    // ===== リアルタイムでFirestoreからピンを取得 =====
+    db.collection('pins').orderBy('timestamp')
+      .onSnapshot(function(snapshot){
+        clearPins();
+        snapshot.forEach(function(doc){
+          addPinRealtime(doc.id, doc.data());
+        });
+      });
   </script>
 </body>
 </html>
