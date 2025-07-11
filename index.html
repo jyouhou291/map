@@ -188,23 +188,16 @@
     const db = firebase.firestore();
     // ============================
 
-    // 自分のピンID一覧をlocalStorageで管理
-    function getMyPinIds() {
-      try {
-        return JSON.parse(localStorage.getItem('myPinIds') || '[]');
-      } catch(e) { return []; }
-    }
-    function addMyPinId(id) {
-      const ids = getMyPinIds();
-      if (!ids.includes(id)) {
-        ids.push(id);
-        localStorage.setItem('myPinIds', JSON.stringify(ids));
+    // ユーザー識別ID（localStorageに保存・利用）
+    function getUserId() {
+      let uid = localStorage.getItem("map_uid");
+      if (!uid) {
+        uid = "uid-" + Math.random().toString(36).substr(2, 16) + Date.now();
+        localStorage.setItem("map_uid", uid);
       }
+      return uid;
     }
-    function removeMyPinId(id) {
-      const ids = getMyPinIds().filter(x=>x!==id);
-      localStorage.setItem('myPinIds', JSON.stringify(ids));
-    }
+    const myUid = getUserId();
 
     const mapContainer = document.getElementById('map-container');
     const addForm = document.getElementById('add-form');
@@ -282,9 +275,8 @@
       } else {
         // 追加
         const docRef = await db.collection('pins').add({
-          name, desc, x, y, imgData, timestamp: new Date()
+          name, desc, x, y, imgData, uid: myUid, timestamp: new Date()
         });
-        addMyPinId(docRef.id);
         resetForm();
       }
     });
@@ -346,7 +338,7 @@
       popups.push(popup);
 
       // --- 編集・削除ボタン（自分のピンのみ）
-      const myPin = getMyPinIds().includes(id);
+      const myPin = (data.uid && data.uid === myUid);
       if (myPin) {
         const btns = popup.querySelector('.popup-btns');
         const editBtn = document.createElement('button');
@@ -389,7 +381,6 @@
           ev.stopPropagation();
           if(confirm("このピンを削除しますか？")){
             await db.collection('pins').doc(id).delete();
-            removeMyPinId(id);
             popup.style.display = 'none';
             resetForm();
           }
