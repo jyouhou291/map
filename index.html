@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>班ごとの発表マップ（リアルタイム共有）</title>
+  <title>班ごとの発表マップ（リアルタイム共有・編集削除可）</title>
   <meta name="viewport" content="width=900, initial-scale=1.0" />
   <!-- Firebase CDN -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -115,6 +115,21 @@
       font-size: 20px;
       margin-top: -8px;
     }
+    .popup-btns {
+      margin-top: 10px;
+      text-align: right;
+    }
+    .popup-btns button {
+      margin-left: 8px;
+      padding: 4px 10px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+    }
+    .edit-btn { background: #f7c948; color: #333; }
+    .delete-btn { background: #e74c3c; color: #fff; }
+    .open-newtab-btn { background:#4e7fdc;color:#fff;}
     .legend {
       margin: 0 auto 10px auto;
       background: #e3ecfa;
@@ -134,21 +149,24 @@
 </head>
 <body>
   <div class="container">
-    <h2>班ごとの発表マップ <span style="font-size:70%;color:#4e7fdc;">（リアルタイム共有）</span></h2>
+    <h2>班ごとの発表マップ <span style="font-size:70%;color:#4e7fdc;">（リアルタイム共有・編集削除可）</span></h2>
     <div class="legend">
       地図上の好きな場所をクリックして、班のピンと説明・写真を追加しましょう。<br>
-      追加したピンは<strong>全員にリアルタイムで表示</strong>されます。
+      <strong>追加したピンは、同じページを開いている全員にリアルタイムで共有されます。<br>
+      他の人がピンを追加・編集・削除した場合も、あなたの画面に自動で反映されます。<br>
+      <span style="color:#2b4fa0;">※自分が追加したピンのみ編集・削除できます。</span></strong>
     </div>
     <form id="add-form">
-      <b>新しいピンを追加</b>
+      <b id="form-title">新しいピンを追加</b>
       <label>班名 <input type="text" id="group-name" required placeholder="例：1班"></label>
       <label>説明 <textarea id="group-desc" rows="2" required placeholder="発表内容など"></textarea></label>
-      <label>画像アップロード <input type="file" id="group-img" accept="image/*" required></label>
+      <label>画像アップロード <input type="file" id="group-img" accept="image/*"></label>
       <img id="img-preview" style="display:none;" />
       <p style="margin-top:10px;">※地図上でピンを立てたい場所をクリックしてください</p>
       <input type="hidden" id="pin-x">
       <input type="hidden" id="pin-y">
       <button type="submit" disabled id="submit-btn">ピンを追加</button>
+      <button type="button" id="cancel-edit-btn" style="display:none;margin-left:8px;background:#aaa;color:#fff;">編集キャンセル</button>
     </form>
     <div id="map-container">
       <img id="campus-map" src="campus-map.jpg" alt="キャンパスマップ" />
@@ -161,7 +179,7 @@
       apiKey: "AIzaSyBa3RZASjOQhIq1IEjwzjbWymbWEIW8XCk",
       authDomain: "schoolmap-be991.firebaseapp.com",
       projectId: "schoolmap-be991",
-      storageBucket: "schoolmap-be991.appspot.com", // 修正済み
+      storageBucket: "schoolmap-be991.appspot.com",
       messagingSenderId: "895521969140",
       appId: "1:895521969140:web:914b953594f23880d9dfa1",
       measurementId: "G-NCSXST508V"
@@ -170,6 +188,24 @@
     const db = firebase.firestore();
     // ============================
 
+    // 自分のピンID一覧をlocalStorageで管理
+    function getMyPinIds() {
+      try {
+        return JSON.parse(localStorage.getItem('myPinIds') || '[]');
+      } catch(e) { return []; }
+    }
+    function addMyPinId(id) {
+      const ids = getMyPinIds();
+      if (!ids.includes(id)) {
+        ids.push(id);
+        localStorage.setItem('myPinIds', JSON.stringify(ids));
+      }
+    }
+    function removeMyPinId(id) {
+      const ids = getMyPinIds().filter(x=>x!==id);
+      localStorage.setItem('myPinIds', JSON.stringify(ids));
+    }
+
     const mapContainer = document.getElementById('map-container');
     const addForm = document.getElementById('add-form');
     const pinXInput = document.getElementById('pin-x');
@@ -177,10 +213,14 @@
     const submitBtn = document.getElementById('submit-btn');
     const imgInput = document.getElementById('group-img');
     const imgPreview = document.getElementById('img-preview');
+    const formTitle = document.getElementById('form-title');
+    const cancelEditBtn = document.getElementById('cancel-edit-btn');
 
     let currentImgData = "";
     let tempPin = null;
     let popups = [];
+    let editingPinId = null;
+    let editingOrigImgData = "";
 
     // 画像プレビュー
     imgInput.addEventListener('change', function(e){
@@ -201,14 +241,14 @@
 
     // 地図クリックでピン位置決定
     mapContainer.addEventListener('click', function(e){
-      // 画像の位置基準で座標取得
+      // 編集モード中は位置変更不可
+      if (editingPinId) return;
       const rect = mapContainer.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       pinXInput.value = x;
       pinYInput.value = y;
       submitBtn.disabled = false;
-      // 仮ピン表示
       if(!tempPin){
         tempPin = document.createElement('div');
         tempPin.id = 'temp-pin';
@@ -220,30 +260,54 @@
       tempPin.style.top = y + 'px';
     });
 
-    // ピン追加
+    // ピン追加・編集
     addForm.addEventListener('submit', async function(e){
       e.preventDefault();
       const name = document.getElementById('group-name').value.trim();
       const desc = document.getElementById('group-desc').value.trim();
       const x = parseInt(pinXInput.value, 10);
       const y = parseInt(pinYInput.value, 10);
-      const imgData = currentImgData || "";
+      // 編集時は画像未選択なら元画像を使う
+      let imgData = currentImgData || editingOrigImgData || "";
       if(!name || !desc || isNaN(x) || isNaN(y) || !imgData){
         alert("すべての項目を入力してください");
         return;
       }
-      // Firestoreに追加
-      await db.collection('pins').add({
-        name, desc, x, y, imgData, timestamp: new Date()
-      });
-      // フォームリセット
+      if (editingPinId) {
+        // 編集
+        await db.collection('pins').doc(editingPinId).update({
+          name, desc, x, y, imgData
+        });
+        resetForm();
+      } else {
+        // 追加
+        const docRef = await db.collection('pins').add({
+          name, desc, x, y, imgData, timestamp: new Date()
+        });
+        addMyPinId(docRef.id);
+        resetForm();
+      }
+    });
+
+    // 編集キャンセル
+    cancelEditBtn.addEventListener('click', function(){
+      resetForm();
+    });
+
+    function resetForm() {
       addForm.reset();
       imgPreview.style.display = "none";
       currentImgData = "";
       submitBtn.disabled = true;
       if(tempPin) tempPin.remove();
       tempPin = null;
-    });
+      editingPinId = null;
+      editingOrigImgData = "";
+      formTitle.textContent = "新しいピンを追加";
+      cancelEditBtn.style.display = "none";
+      submitBtn.textContent = "ピンを追加";
+      imgInput.required = false;
+    }
 
     // 既存ピンとポップアップを全削除
     function clearPins(){
@@ -265,6 +329,7 @@
       // ポップアップ
       const popup = document.createElement('div');
       popup.className = 'popup';
+      // 初期位置（仮）
       popup.style.left = (data.x+36) + 'px';
       popup.style.top = (data.y-60) + 'px';
       popup.innerHTML = `
@@ -272,16 +337,130 @@
         <b style="color:#2b4fa0;">${data.name}</b><br>
         <img src="${data.imgData}" alt="班画像"><br>
         <div>${data.desc}</div>
+        <div class="popup-btns"></div>
+        <button class="open-newtab-btn" style="margin-top:8px;padding:5px 12px;font-size:15px;background:#4e7fdc;color:#fff;border:none;border-radius:6px;cursor:pointer;">
+          別タブで表示
+        </button>
       `;
       mapContainer.appendChild(popup);
       popups.push(popup);
+
+      // --- 編集・削除ボタン（自分のピンのみ）
+      const myPin = getMyPinIds().includes(id);
+      if (myPin) {
+        const btns = popup.querySelector('.popup-btns');
+        const editBtn = document.createElement('button');
+        editBtn.textContent = "編集";
+        editBtn.className = "edit-btn";
+        editBtn.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          // 編集モードへ
+          formTitle.textContent = "ピンを編集";
+          document.getElementById('group-name').value = data.name;
+          document.getElementById('group-desc').value = data.desc;
+          pinXInput.value = data.x;
+          pinYInput.value = data.y;
+          submitBtn.disabled = false;
+          editingPinId = id;
+          editingOrigImgData = data.imgData;
+          imgPreview.src = data.imgData;
+          imgPreview.style.display = "block";
+          cancelEditBtn.style.display = "inline-block";
+          submitBtn.textContent = "保存";
+          imgInput.required = false;
+          // 仮ピン表示（編集位置へ）
+          if(!tempPin){
+            tempPin = document.createElement('div');
+            tempPin.id = 'temp-pin';
+            tempPin.className = 'pin';
+            tempPin.style.opacity = 0.5;
+            mapContainer.appendChild(tempPin);
+          }
+          tempPin.style.left = data.x + 'px';
+          tempPin.style.top = data.y + 'px';
+          popup.style.display = 'none';
+        });
+        btns.appendChild(editBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = "削除";
+        delBtn.className = "delete-btn";
+        delBtn.addEventListener('click', async function(ev){
+          ev.stopPropagation();
+          if(confirm("このピンを削除しますか？")){
+            await db.collection('pins').doc(id).delete();
+            removeMyPinId(id);
+            popup.style.display = 'none';
+            resetForm();
+          }
+        });
+        btns.appendChild(delBtn);
+      }
 
       // ピンをクリックでポップアップ表示
       pin.addEventListener('click', function(ev){
         // すべてのポップアップを非表示
         popups.forEach(p=>p.style.display='none');
         popup.style.display = 'block';
+
+        // ===== ここから位置調整ロジック =====
+        // 一旦表示してからサイズ取得
+        const popupRect = popup.getBoundingClientRect();
+        const mapRect = mapContainer.getBoundingClientRect();
+
+        let left = data.x + 36;
+        let top = data.y - 60;
+
+        // 右端にはみ出す場合
+        if (left + popupRect.width > mapContainer.offsetWidth) {
+          left = mapContainer.offsetWidth - popupRect.width - 10;
+          if (left < 0) left = 0;
+        }
+        // 左端にはみ出す場合
+        if (left < 0) left = 0;
+
+        // 下端にはみ出す場合
+        if (top + popupRect.height > mapContainer.offsetHeight) {
+          top = data.y - popupRect.height - 20;
+          if (top < 0) top = 0;
+        }
+        // 上端にはみ出す場合
+        if (top < 0) top = 0;
+
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+        // ===== ここまで位置調整ロジック =====
+
         ev.stopPropagation();
+      });
+
+      // 「別タブで表示」ボタンのイベント
+      popup.querySelector('.open-newtab-btn').addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        const newWin = window.open('', '_blank');
+        newWin.document.write(`
+          <!DOCTYPE html>
+          <html lang="ja">
+          <head>
+            <meta charset="UTF-8">
+            <title>${data.name} - 発表詳細</title>
+            <style>
+              body { font-family: 'Segoe UI', 'ヒラギノ角ゴ ProN', 'メイリオ', sans-serif; background: #f0f6ff; margin:0; padding:32px; }
+              .content { background: #fff; padding: 32px; border-radius: 14px; max-width: 480px; margin: 40px auto; box-shadow: 0 2px 12px rgba(0,80,200,0.09);}
+              h2 { color: #2b4fa0; }
+              img { max-width: 320px; border-radius: 10px; border: 1px solid #b8d2f1; margin-bottom: 16px;}
+              .desc { font-size: 18px; color: #222;}
+            </style>
+          </head>
+          <body>
+            <div class="content">
+              <h2>${data.name}</h2>
+              <img src="${data.imgData}" alt="班画像"><br>
+              <div class="desc">${data.desc.replace(/\n/g, '<br>')}</div>
+            </div>
+          </body>
+          </html>
+        `);
       });
     }
 
